@@ -10,25 +10,21 @@ require('console-stamp')(console, {
 });
 
 
-//const turnOnPause = 1 * 1000   // 1 seconds
-const trig1Pause = 1 * 1000  // 1 seconds
-const trig2Pause = 1 * 1000  // 1 seconds
-//const turnOffPause = 10 * 1000  // 5 seconds
-const zoneName = "Sabaj" //"Living Room speaker"
-
 let RoonApi = require("node-roon-api");
 let RoonApiSettings = require("node-roon-api-settings");
 let RoonApiStatus = require("node-roon-api-status");
 let RoonApiTransport = require("node-roon-api-transport");
 let ontime = require('ontime')
 
+var core;
 var Gpio = require('onoff').Gpio //Include onoff to interact with GPIO
-var P_On = new Gpio(23, 'out'); // use GPIO 23 as an output "P_On" to DAC Power
-var P_Good = new Gpio(22, 'in', 'both'); // use GPIO 22 as an input "P_Good" as feedback on DAC power. Trigger on both rising and falling edges.
-var Trig_Out_1 = new Gpio(6, 'out'); // use GPIO 6 as an output "Trig_Out_1" as an external trigger output
-var Trig_Out_2 = new Gpio(13, 'out'); // user GPIO 13 as an output "Trig_Out_2" as an external trigger output
-var Trig_In = new Gpio(16, 'in', 'both'); // use GPIO 16 as an input "Trig_In" from an external trigger input. Trigger on both rising and falling edges.
+var P_On = new Gpio(12, 'out'); // use GPIO 23 as an output "P_On" to DAC Power
+var P_Good = new Gpio(5, 'in', 'both', {debounceTimeout: 10}); // use GPIO 22 as an input "P_Good" as feedback on DAC power. Trigger on both rising and falling edges.
+var Trig_Out_1 = new Gpio(13, 'out'); // use GPIO 6 as an output "Trig_Out_1" as an external trigger output
+var Trig_Out_2 = new Gpio(16, 'out'); // user GPIO 13 as an output "Trig_Out_2" as an external trigger output
+var Trig_In = new Gpio(6, 'in', 'both', {debounceTimeout: 10}); // use GPIO 16 as an input "Trig_In" from an external trigger input. Trigger on both rising and falling edges.
 
+var trg_by = "Status";
 var offPause;
 
 let trigger_state = "UNKNOWN"
@@ -37,24 +33,26 @@ let last_trigger_write = new Date();
 let roon = new RoonApi({
     extension_id:        'com.flyingsparks.roon.dac',
     display_name:        "DAC Power Switch",
-    display_version:     "0.1.0",
+    display_version:     "0.2.0",
     publisher:           'Flyingsparks',
     email:               'stefan.raabe@.gmail.com',
     website:             '',
     log_level:           'none',
-    
-    core_paired: function(core) {
-            let transport = core.services.RoonApiTransport;
-            let tracker = new_tracker(core, transport);
-            transport.subscribe_zones(tracker.zone_event);
-        },
 
-        core_unpaired: function(core) {
-            console.log("-", "LOST");
-        }
+    core_paired: function(core_) {
+        core = core_;
+        let transport = core.services.RoonApiTransport;
+        let tracker = new_tracker(core, transport);
+        transport.subscribe_zones(tracker.zone_event);
+    },
+
+    core_unpaired: function(core_) {
+        core = undefined;
+        console.log("-", "LOST");
+    }
 });
 
-//Settings
+// Settings in Roon
 var mysettings = Object.assign({
     zone:             null,
     turnOnPause:      1,
@@ -152,7 +150,7 @@ function new_tracker(core, transport) {
         zone_id: "",
         last_state : "",
     }
-    
+
     t.on_state_changed = function() {
         console.log("zone state now " + t.last_state)
         if (!((t.last_state != "playing") && (t.last_state != "loading"))) {
@@ -160,19 +158,20 @@ function new_tracker(core, transport) {
                 clearTimeout( offPause );
                 transport.control(t.zone, "pause", (x) => setTimeout(() => transport.control(t.zone, "play"), mysettings.turnOnPause*1000))
             }
+            trg_by = "ROON"
             set_trigger(true)
         }
         if (!(t.last_state != "stopped")) {
             clearTimeout(offPause)
+            trg_by = "ROON"
             offPause = setTimeout(() => {set_trigger(false); }, mysettings.turnOffPause*1000);
         }
     }
-        
+
     t.zone_event = function(cmd, data) {
         if (cmd == "Subscribed") {
             data.zones.forEach( z => { 
                 if (z.display_name == mysettings.zone.name) {
-//                if (z.display_name == zoneName) {
                     t.zone = z;
                     t.zone_id = z.zone_id;
                     t.last_state = z.state;
@@ -180,7 +179,7 @@ function new_tracker(core, transport) {
             })
             console.log("zones", t.zone.display_name, t.zone_id, t.last_state);
             t.on_state_changed();
-            
+
         } else if (cmd == "Changed") {
             if ("zones_changed" in data) {
                 data.zones_changed.forEach( z => {
@@ -237,32 +236,53 @@ function trigger_callback(data) {
 function dac_trigger_gpio(trg, callback) {
     console.log("setting P_On:" + trg)
     last_trigger_write = new Date();
-    
+
     P_On.writeSync(trg); // set P_On GPIO to pon.
     Trig_Out_1.writeSync(trg);
     Trig_Out_2.writeSync(trg);
-    callback = read_dac_gpio();
+//    callback = read_dac_gpio();
 }
 
 function read_dac_gpio() {
     let pon = P_On.readSync();
     let pgood = P_Good.readSync();
     let new_state = pgood ? "ON" : "OFF"
-    let trg_by = pon == pgood ? "ROON" : "DAC"
+    let trigIn = Trig_In.readSync();
+    let trig1 = Trig_Out_1.readSync();
+    let trig2 = Trig_Out_2.readSync();
+
+//    let trg_by = pon == pgood ? "ROON" : "DAC"
     trigger_state = new_state;
+    console.log("P_Good: " + pgood + ",  P_On: " + pon + ",  Trig_In: " + trigIn + ",  Trig Out 1: " + trig1 + ",  Trig Out 2: " + trig2);
     svc_status.set_status("DAC Power: " + new_state + " by " + trg_by, false);
     return [pon, pgood]
 }
 
-
+// Watch for interrupts on the P_Good line to track Power On/Off events by user or by LiFePO4 turning off based on timers, battery voltage etc.
 P_Good.watch(function (err, value) { //Watch hardware interrupts on P_GOod GPIO, specify callback function
   if (err) { //if error
     console.error('There was an error', err); //output error message to console
   return;
   }
+  if (value != P_On.readSync()) trg_by="DAC";
   read_dac_gpio();
   if (value == 0) {
-    //transport.control(t.zone, "stop");
+      core.services.RoonApiTransport.control(mysettings.zone, 'pause');
+      dac_trigger_gpio(0);
+      setTimeout(() => clearTimeout(offPause), 1000);
   }
 });
+
+// Watch for interrupts on the Trig_In pin to turn on based on the External Trigger
+Trig_In.watch(function(err, value) {
+    if (err){ //if error
+        console.error('There was an error', err);  //output error message to console
+    return;
+    }
+    trg_by = "EXT TRIGGER";
+    console.log("External trigger: " + value);
+    dac_trigger_gpio(value);
+});
+
+
 
