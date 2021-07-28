@@ -1,0 +1,14 @@
+[Unit]
+Description=Roon DAC Power Switch
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/node .
+Type=simple
+Restart=on-failure
+RestartSec=61s
+WorkingDirectory=/opt/Flyingsparks/roon-dac-trigger/
+User=ropieee
+
+[Install]
+WantedBy=default.target

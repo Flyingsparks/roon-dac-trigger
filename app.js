@@ -16,6 +16,9 @@ let RoonApiStatus = require("node-roon-api-status");
 let RoonApiTransport = require("node-roon-api-transport");
 let ontime = require('ontime')
 
+var os = require("os");
+var hostname = os.hostname();
+
 var core;
 var Gpio = require('onoff').Gpio //Include onoff to interact with GPIO
 var P_On = new Gpio(12, 'out'); // use GPIO 23 as an output "P_On" to DAC Power
@@ -30,9 +33,11 @@ var offPause;
 let trigger_state = "UNKNOWN"
 let last_trigger_write = new Date();
 
+clearTimeout(offPause);
+
 let roon = new RoonApi({
     extension_id:        'com.flyingsparks.roon.dac',
-    display_name:        "DAC Power Switch",
+    display_name:        "DAC Power Switch [" + hostname + "]",
     display_version:     "0.2.0",
     publisher:           'Flyingsparks',
     email:               'stefan.raabe@.gmail.com',
