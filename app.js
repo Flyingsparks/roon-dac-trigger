@@ -38,7 +38,7 @@ clearTimeout(offPause);
 let roon = new RoonApi({
     extension_id:        'com.flyingsparks.roon.dac',
     display_name:        "DAC Power Switch [" + hostname + "]",
-    display_version:     "0.2.0",
+    display_version:     "0.2.1",
     publisher:           'Flyingsparks',
     email:               'stefan.raabe@.gmail.com',
     website:             '',
